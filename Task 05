@@ -1,0 +1,90 @@
+pip install -q tensorflow datasets huggingface_hub
+from datasets import load_dataset
+
+# Example: IAM sentences on Hugging Face
+ds = load_dataset("alpayariyak/IAM_Sentences")  # or "Teklia/IAM-line"
+# Inspect
+print(ds)
+# get text column name (e.g., "text" or "transcription" depending on dataset)
+# Example: dataset has column 'text' or 'transcription' - adapt if different
+texts = []
+for split in ["train", "validation", "test"]:
+    if split in ds:
+        for ex in ds[split]:
+            # Use the transcription field (check dataset)
+            txt = ex.get("text") or ex.get("transcription") or ex.get("trans")
+            if txt:
+                texts.append(txt.strip())
+
+corpus = "\n".join(texts)
+len(corpus), corpus[:400]
+import numpy as np
+chars = sorted(list(set(corpus)))
+vocab_size = len(chars)
+print("Vocab size:", vocab_size)
+
+char2idx = {c:i for i,c in enumerate(chars)}
+idx2char = {i:c for c,i in char2idx.items()}
+
+# encode
+encoded = np.array([char2idx[c] for c in corpus], dtype=np.int32)
+seq_length = 100          # sequence length
+step = 1
+inputs = []
+targets = []
+for i in range(0, len(encoded) - seq_length, step):
+    inputs.append(encoded[i:i+seq_length])
+    targets.append(encoded[i+seq_length])
+inputs = np.array(inputs)
+targets = np.array(targets)
+print("num seq:", inputs.shape[0])
+import tensorflow as tf
+from tensorflow.keras import layers, models
+
+embedding_dim = 64
+rnn_units = 256
+
+model = models.Sequential([
+    layers.Input(shape=(seq_length,)),
+    layers.Embedding(input_dim=vocab_size, output_dim=embedding_dim),
+    layers.LSTM(rnn_units, return_sequences=False),
+    layers.Dense(vocab_size, activation='softmax')
+])
+
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+model.summary()
+batch_size = 128
+epochs = 20
+
+# dataset pipeline
+dataset = tf.data.Dataset.from_tensor_slices((inputs, targets))
+dataset = dataset.shuffle(10000).batch(batch_size, drop_remainder=True)
+
+checkpoint = tf.keras.callbacks.ModelCheckpoint("char_rnn.h5", save_best_only=True)
+history = model.fit(dataset, epochs=epochs, callbacks=[checkpoint])
+import numpy as np
+import tensorflow as tf
+
+def sample(preds, temperature=1.0):
+    preds = np.asarray(preds).astype('float64')
+    preds = np.log(preds + 1e-9) / temperature
+    exp_preds = np.exp(preds)
+    preds = exp_preds / np.sum(exp_preds)
+    return np.random.choice(range(len(preds)), p=preds)
+
+def generate_text(seed_text, length=500, temperature=1.0):
+    model_loaded = tf.keras.models.load_model("char_rnn.h5")
+    generated = seed_text
+    seed = [char2idx[c] for c in seed_text[-seq_length:]]  # pad/truncate
+    for _ in range(length):
+        x = np.array(seed[-seq_length:])[None, :]
+        preds = model_loaded.predict(x, verbose=0)[0]
+        next_idx = sample(preds, temperature)
+        next_char = idx2char[next_idx]
+        generated += next_char
+        seed.append(next_idx)
+    return generated
+
+# Example usage:
+seed = "On a cold morning,"
+print(generate_text(seed, length=300, temperature=0.8))
