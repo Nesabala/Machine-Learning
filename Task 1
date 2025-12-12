@@ -1,0 +1,54 @@
+!pip install scikit-learn pandas numpy nltk
+import pandas as pd
+
+df = pd.read_csv("/content/genres_v2.csv")   # update path in your system
+df.head()
+import re
+import nltk
+nltk.download('stopwords')
+from nltk.corpus import stopwords
+
+stopwords = set(stopwords.words('english'))
+
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r"[^a-zA-Z\s]", "", text)
+    text = " ".join([word for word in text.split() if word not in stopwords])
+    return text
+
+df["clean_plot"] = df["plot"].apply(clean_text)
+from sklearn.preprocessing import MultiLabelBinarizer
+
+df["genres"] = df["genres"].apply(eval)  # dataset stores as string representation of list
+
+mlb = MultiLabelBinarizer()
+y = mlb.fit_transform(df["genres"])
+genre_classes = mlb.classes_
+print("Genres:", genre_classes)
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(
+    df["clean_plot"], y, test_size=0.2, random_state=42
+)
+from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
+
+model = OneVsRestClassifier(LogisticRegression(max_iter=200))
+model.fit(X_train_tfidf, y_train)
+from sklearn.metrics import accuracy_score, f1_score, classification_report
+
+y_pred = model.predict(X_test_tfidf)
+
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("F1 Score:", f1_score(y_test, y_pred, average='micro'))
+print("\nClassification Report:\n")
+print(classification_report(y_test, y_pred, target_names=genre_classes))
+def predict_genre(plot):
+    plot_clean = clean_text(plot)
+    plot_vec = tfidf.transform([plot_clean])
+    pred = model.predict(plot_vec)
+    genres = mlb.inverse_transform(pred)
+    return genres
+
+plot = """A young boy discovers he has magical powers and attends a secret wizarding school."""
+print("Predicted Genre:", predict_genre(plot))
